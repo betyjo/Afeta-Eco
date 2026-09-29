@@ -1,252 +1,273 @@
-'use client'
-
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
-import dynamic from 'next/dynamic'
-
-const VendorMap = dynamic(
-  () => import('@/components/map/map'),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex h-full items-center justify-center bg-green-50">
-        <p className="font-semibold text-green-700">
-          Loading map...
-        </p>
-      </div>
-    ),
-  }
-)
+import { createClient } from '@/lib/supabase/server'
+import VendorMap from '@/components/map/map'
 
 interface Vendor {
   id: string
   name: string
   product_name: string
+  category: string
   price: number
-  latitude: number
-  longitude: number
   photo_url: string | null
+  latitude: number | null
+  longitude: number | null
+  is_available: boolean
   is_verified: boolean
 }
 
-export default function MapPage() {
-  const searchParams = useSearchParams()
+export default async function MapPage() {
+  const supabase = await createClient()
 
-  const search = searchParams.get('search') || ''
-  const category = searchParams.get('category') || ''
-  const minPrice = searchParams.get('minPrice') || ''
-  const maxPrice = searchParams.get('maxPrice') || ''
+  const { data, error } = await supabase
+    .from('vendors')
+    .select(`
+      id,
+      name,
+      product_name,
+      category,
+      price,
+      photo_url,
+      latitude,
+      longitude,
+      is_available,
+      is_verified
+    `)
+    .eq('is_available', true)
+    .order('created_at', {
+      ascending: false,
+    })
 
-  const [vendors, setVendors] = useState<Vendor[]>([])
-  const [userLocation, setUserLocation] =
-    useState<[number, number] | null>(null)
+  const vendors = (data ?? []) as Vendor[]
 
-  const [loading, setLoading] = useState(true)
-  const [locationLoading, setLocationLoading] = useState(false)
-  const [error, setError] = useState('')
+  const vendorsWithLocation = vendors.filter(
+    (vendor) =>
+      typeof vendor.latitude === 'number' &&
+      typeof vendor.longitude === 'number' &&
+      Number.isFinite(vendor.latitude) &&
+      Number.isFinite(vendor.longitude) &&
+      vendor.latitude >= -90 &&
+      vendor.latitude <= 90 &&
+      vendor.longitude >= -180 &&
+      vendor.longitude <= 180
+  )
 
-  useEffect(() => {
-    async function loadVendors() {
-      setLoading(true)
-      setError('')
-
-      const supabase = createClient()
-
-      let query = supabase
-        .from('vendors')
-        .select(
-          'id, name, product_name, price, latitude, longitude, photo_url, is_verified'
-        )
-        .eq('is_available', true)
-
-      // Search
-      if (search.trim()) {
-        query = query.or(
-          `product_name.ilike.%${search}%,name.ilike.%${search}%,category.ilike.%${search}%`
-        )
-      }
-
-      // Category
-      if (category) {
-        query = query.eq('category', category)
-      }
-
-      // Minimum price
-      if (minPrice) {
-        query = query.gte('price', Number(minPrice))
-      }
-
-      // Maximum price
-      if (maxPrice) {
-        query = query.lte('price', Number(maxPrice))
-      }
-
-      const { data, error } = await query
-
-      if (error) {
-        setError(error.message)
-      } else {
-        setVendors(data ?? [])
-      }
-
-      setLoading(false)
-    }
-
-    loadVendors()
-  }, [search, category, minPrice, maxPrice])
-
-  function findMyLocation() {
-    if (!navigator.geolocation) {
-      setError('Your browser does not support location services.')
-      return
-    }
-
-    setLocationLoading(true)
-    setError('')
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setUserLocation([
-          position.coords.latitude,
-          position.coords.longitude,
-        ])
-
-        setLocationLoading(false)
-      },
-      () => {
-        setError(
-          'Could not access your location. Please allow location access in your browser.'
-        )
-
-        setLocationLoading(false)
-      }
-    )
-  }
-
-  const hasFilters =
-    search || category || minPrice || maxPrice
+  const vendorsWithoutLocation = vendors.filter(
+    (vendor) => !vendorsWithLocation.some((v) => v.id === vendor.id)
+  )
 
   return (
     <main className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="border-b border-green-100 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
+      <header className="border-b bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
           <Link
-            href="/Search"
-            className="text-2xl font-black text-green-800"
+            href="/"
+            className="text-2xl font-black text-green-700"
           >
             AFTA
           </Link>
 
-          <Link
-            href="/Search"
-            className="rounded-xl border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50"
-          >
-            Search products
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href="/Search"
+              className="rounded-xl px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
+            >
+              Marketplace
+            </Link>
+
+            <Link
+              href="/auctions"
+              className="rounded-xl bg-green-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-800"
+            >
+              Auctions
+            </Link>
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-6 py-8">
-        {/* Title */}
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="font-semibold text-green-700">
-              AFTA Marketplace
-            </p>
+      <div className="mx-auto max-w-7xl px-4 py-8">
+        <div>
+          <p className="text-sm font-bold uppercase tracking-wide text-green-700">
+            Find nearby sellers
+          </p>
 
-            <h1 className="mt-1 text-3xl font-bold text-green-950">
-              Find sellers near you
-            </h1>
+          <h1 className="mt-2 text-3xl font-black text-gray-900">
+            Vendor Map
+          </h1>
 
-            <p className="mt-2 text-gray-600">
-              {hasFilters
-                ? 'Showing sellers that match your search.'
-                : 'Explore available products around your location.'}
-            </p>
-          </div>
-
-          <button
-            onClick={findMyLocation}
-            disabled={locationLoading}
-            className="rounded-xl bg-green-700 px-5 py-3 font-semibold text-white transition hover:bg-green-800 disabled:opacity-50"
-          >
-            {locationLoading
-              ? 'Finding you...'
-              : '📍 Find my location'}
-          </button>
+          <p className="mt-2 text-gray-500">
+            Explore available sellers and open their profiles
+            directly from the map.
+          </p>
         </div>
 
-        {/* Active search */}
-        {hasFilters && (
-          <div className="mb-5 rounded-2xl border border-green-100 bg-white p-4">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="font-semibold text-green-900">
-                Filters:
-              </span>
+        {error ? (
+          <div className="mt-8 rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">
+            We couldn't load the vendor locations right now.
+          </div>
+        ) : (
+          <>
+            {/* Map */}
+            <div className="mt-8 overflow-hidden rounded-2xl bg-white shadow-sm">
+              {vendorsWithLocation.length > 0 ? (
+                <VendorMap vendors={vendorsWithLocation} />
+              ) : (
+                <div className="flex h-[500px] flex-col items-center justify-center px-6 text-center">
+                  <div className="text-5xl">📍</div>
 
-              {search && (
-                <span className="rounded-full bg-green-50 px-3 py-1 text-green-700">
-                  Search: {search}
-                </span>
-              )}
+                  <h2 className="mt-4 text-xl font-bold text-gray-900">
+                    No vendor locations available
+                  </h2>
 
-              {category && (
-                <span className="rounded-full bg-green-50 px-3 py-1 text-green-700">
-                  Category: {category}
-                </span>
-              )}
-
-              {minPrice && (
-                <span className="rounded-full bg-green-50 px-3 py-1 text-green-700">
-                  Min: {minPrice} ETB
-                </span>
-              )}
-
-              {maxPrice && (
-                <span className="rounded-full bg-green-50 px-3 py-1 text-green-700">
-                  Max: {maxPrice} ETB
-                </span>
+                  <p className="mt-2 max-w-md text-gray-500">
+                    Vendors will appear on the map after they
+                    provide a valid location.
+                  </p>
+                </div>
               )}
             </div>
-          </div>
-        )}
 
-        {error && (
-          <div className="mb-5 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">
-            {error}
-          </div>
-        )}
+            {/* Vendors without location */}
+            {vendorsWithoutLocation.length > 0 && (
+              <section className="mt-10">
+                <div className="mb-5">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    Sellers without map location
+                  </h2>
 
-        {/* Map */}
-        <div className="overflow-hidden rounded-3xl border border-green-100 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-            <div>
-              <h2 className="font-bold text-green-950">
-                Vendor map
-              </h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    You can still view their product and seller
+                    information.
+                  </p>
+                </div>
 
-              <p className="text-sm text-gray-500">
-                {loading
-                  ? 'Loading vendors...'
-                  : `${vendors.length} matching seller${
-                      vendors.length === 1 ? '' : 's'
-                    }`}
-              </p>
-            </div>
-          </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {vendorsWithoutLocation.map((vendor) => (
+                    <Link
+                      key={vendor.id}
+                      href={`/vendors/${vendor.id}`}
+                      className="flex items-center gap-4 rounded-2xl bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      {vendor.photo_url ? (
+                        <img
+                          src={vendor.photo_url}
+                          alt={vendor.product_name}
+                          className="h-20 w-20 rounded-xl object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl bg-green-50 text-3xl">
+                          📦
+                        </div>
+                      )}
 
-          <div className="h-[650px]">
-            {!loading && (
-              <VendorMap
-                vendors={vendors}
-                userLocation={userLocation}
-              />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase text-green-700">
+                          {vendor.category}
+                        </p>
+
+                        <h3 className="truncate font-bold text-gray-900">
+                          {vendor.product_name}
+                        </h3>
+
+                        <p className="text-sm text-gray-500">
+                          {vendor.name}
+                        </p>
+
+                        <p className="mt-1 font-bold text-green-700">
+                          {Number(
+                            vendor.price
+                          ).toLocaleString()}{' '}
+                          ETB
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </section>
             )}
-          </div>
-        </div>
+
+            {/* All vendors */}
+            <section className="mt-10">
+              <div className="mb-5 flex items-end justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">
+                    All sellers
+                  </h2>
+
+                  <p className="mt-1 text-sm text-gray-500">
+                    {vendors.length} available seller
+                    {vendors.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </div>
+
+              {vendors.length === 0 ? (
+                <div className="rounded-2xl bg-white p-10 text-center shadow-sm">
+                  <p className="text-gray-500">
+                    No available sellers yet.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {vendors.map((vendor) => (
+                    <Link
+                      key={vendor.id}
+                      href={`/vendors/${vendor.id}`}
+                      className="overflow-hidden rounded-2xl bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+                    >
+                      {vendor.photo_url ? (
+                        <img
+                          src={vendor.photo_url}
+                          alt={vendor.product_name}
+                          className="h-44 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-44 items-center justify-center bg-green-50 text-5xl">
+                          📦
+                        </div>
+                      )}
+
+                      <div className="p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold uppercase text-green-700">
+                              {vendor.category}
+                            </p>
+
+                            <h3 className="mt-1 font-bold text-gray-900">
+                              {vendor.product_name}
+                            </h3>
+                          </div>
+
+                          {vendor.is_verified && (
+                            <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-bold text-green-700">
+                              ✓
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="mt-2 text-sm text-gray-500">
+                          {vendor.name}
+                        </p>
+
+                        <p className="mt-2 font-bold text-green-700">
+                          {Number(
+                            vendor.price
+                          ).toLocaleString()}{' '}
+                          ETB
+                        </p>
+
+                        <div className="mt-3 text-sm font-semibold text-green-700">
+                          View seller →
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
       </div>
     </main>
   )
